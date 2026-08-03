@@ -1,0 +1,29 @@
+FROM debian:trixie
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    autoconf \
+    automake \
+    autopoint \
+    bison \
+    gcc \
+    gettext \
+    libc6-dev \
+    libtool \
+    make \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY . /source
+
+# Docker does not carry the checkout's externally stored Git objects into the
+# image. Supply the exact release identity that the upstream release tarball
+# would contain, then regenerate with the current maintenance toolchain.
+RUN printf '%s\n' 2.36.1 > /source/.tarball-version \
+    && cd /source \
+    && ./autogen.sh
+
+WORKDIR /work
+
+CMD ["/bin/sh"]

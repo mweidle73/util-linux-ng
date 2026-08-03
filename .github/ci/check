@@ -1,0 +1,56 @@
+#!/bin/sh
+
+set -eu
+
+WORK_DIR=$(mktemp -d)
+SOURCE_DIR="$WORK_DIR/source"
+BUILD_DIR="$WORK_DIR/build"
+STAGE_DIR="$WORK_DIR/stage"
+
+cleanup()
+{
+    rm -rf "$WORK_DIR"
+}
+trap cleanup EXIT HUP INT TERM
+
+echo "ci: preparing private writable source, build and staging trees"
+cp -a /source "$SOURCE_DIR"
+mkdir "$BUILD_DIR" "$STAGE_DIR"
+
+echo "ci: configuring the historical Abuild libuuid surface"
+cd "$BUILD_DIR"
+"$SOURCE_DIR/configure" \
+    --quiet \
+    --prefix=/usr \
+    --disable-all-programs \
+    --enable-libuuid \
+    --disable-shared \
+    --disable-nls \
+    --without-ncurses \
+    --without-ncursesw \
+    --without-python \
+    --without-systemd \
+    --without-udev
+
+echo "ci: building libuuid and its test programs"
+make -j8
+make -j8 test_uuid_namespace test_uuid_parser
+
+echo "ci: running the applicable non-privileged upstream UUID tests"
+for TEST_NAME in uuid/namespace uuid/uuid_parser; do
+    echo "ci: running $TEST_NAME"
+    timeout 60 "$SOURCE_DIR/tests/run.sh" \
+        --srcdir="$SOURCE_DIR" \
+        --builddir="$BUILD_DIR" \
+        --parallel=1 \
+        --show-diff \
+        "$TEST_NAME"
+done
+
+echo "ci: staging and checking the static library surface"
+make DESTDIR="$STAGE_DIR" install
+test -f "$STAGE_DIR/usr/lib/libuuid.a"
+test -f "$STAGE_DIR/usr/include/uuid/uuid.h"
+grep -Fx 'Version: 2.36.1' libuuid/uuid.pc
+
+echo "ci: all historical Abuild util-linux checks passed"
